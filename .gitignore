@@ -1,0 +1,14 @@
+# Environment variables
+.env
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS files
+.DS_Store
+
+# Output and temporary files
+scripts/output/*.pptx
+scripts/content/*.json

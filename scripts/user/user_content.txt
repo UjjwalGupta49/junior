@@ -1,0 +1,1 @@
+i want to create a presentation about Google's gemini live AI based product that can help users navigate the world, the product works via looking at the camera of the user and talking to them via voice. The Gemini live AI gives the user details about what it sees through camera and answers users queries through voice chat.
