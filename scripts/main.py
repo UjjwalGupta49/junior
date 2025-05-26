@@ -13,11 +13,14 @@ load_dotenv()
 # but for sibling files, direct import should work if the CWD is this directory.
 from extract_slide_details import extract_slide_details
 from update_presentation_from_json import update_presentation_from_json
+from intelligent_slide_organizer import intelligent_slide_organization_step
+from create_presentation_from_reorganized_json import create_and_update_reorganized_presentation
 
 # --- Configuration: File Paths ---
 # All paths are relative to the script's location (learning/template/)
 ORIGINAL_TEMPLATE_PPTX = "./template/template.pptx" # The master template
 SLIDE_DETAILS_JSON = "./content/slide_details.json" # Intermediate JSON with extracted details
+SLIDE_DETAILS_REORGANIZED_JSON = "./content/slide_details_reorganized.json" # JSON after intelligent reorganization
 USER_UPDATED_JSON_CONTENT = "./content/slide_details_updated.json" # JSON after user (or placeholder) updates
 FINAL_UPDATED_PPTX = "./output/template_updated.pptx" # Final presentation with content updates
 
@@ -49,15 +52,15 @@ def run_extraction_step(input_pptx_path, output_json_path):
         return False
 
 # --- 2. Placeholder for Updating JSON Content ---
-def placeholder_modify_json_content(original_json_path, updated_json_path, user_content):
+def placeholder_modify_json_content(reorganized_json_path, updated_json_path, user_content):
     """
     Modifies JSON content using Gemini AI.
-    Loads content from original_json_path, sends it to Gemini AI for modification,
+    Loads content from reorganized_json_path, sends it to Gemini AI for modification,
     and saves the result to updated_json_path.
     """
-    print(f"--- Step 2: Modifying JSON content using Gemini AI ---")
+    print(f"--- Step 3: Modifying JSON content using Gemini AI ---")
     try:
-        with open(original_json_path, 'r') as f_orig:
+        with open(reorganized_json_path, 'r') as f_orig:
             original_data = json.load(f_orig)
         
         original_json_string = json.dumps(original_data, indent=2)
@@ -84,7 +87,6 @@ Ensure your output is ONLY the modified JSON data, valid and parsable, starting 
 Do not include any explanatory text or markdown formatting like ```json before or after the JSON output.
 """
         print("Sending content to Gemini AI for modification...")
-        print(prompt)
         response = model.generate_content(prompt)
         
         # Clean the response: remove potential markdown code block fences
@@ -102,7 +104,7 @@ Do not include any explanatory text or markdown formatting like ```json before o
         return True
 
     except FileNotFoundError:
-        print(f"Error: Original JSON '{original_json_path}' not found for modification.")
+        print(f"Error: Reorganized JSON '{reorganized_json_path}' not found for modification.")
         return False
     except Exception as e:
         print(f"Error during Gemini AI JSON modification: {e}")
@@ -114,23 +116,14 @@ Do not include any explanatory text or markdown formatting like ```json before o
 
 # --- 3. Update Presentation from JSON ---
 def run_presentation_update_step(source_pptx_path, target_pptx_path, updated_json_path):
-    """Copies the source PPTX and updates it using the modified JSON file."""
-    print(f"--- Step 3: Updating presentation content ---")
-    try:
-        shutil.copy(source_pptx_path, target_pptx_path)
-        print(f"Successfully copied '{source_pptx_path}' to '{target_pptx_path}'")
-    except FileNotFoundError:
-        print(f"Error: Source presentation '{source_pptx_path}' not found for copying.")
-        return False
-    except Exception as e:
-        print(f"Error copying presentation: {e}")
-        return False
-
-    success = update_presentation_from_json(updated_json_path, target_pptx_path)
+    """Creates a reorganized presentation and updates it using the modified JSON file."""
+    print(f"--- Step 4: Creating and updating reorganized presentation ---")
+    # Use the new reorganized presentation creation function
+    success = create_and_update_reorganized_presentation(source_pptx_path, updated_json_path, target_pptx_path)
     if success:
-        print(f"Presentation update based on '{updated_json_path}' completed.")
+        print(f"Reorganized presentation creation and update based on '{updated_json_path}' completed.")
     else:
-        print(f"Failed to update presentation using '{updated_json_path}'.")
+        print(f"Failed to create and update reorganized presentation using '{updated_json_path}'.")
     return success
 
 # --- Main Workflow Execution ---
@@ -141,7 +134,7 @@ if __name__ == "__main__":
     pycache_dir_name = "__pycache__" # Name of the directory to be cleaned up
     workflow_status_message = "Workflow did not complete successfully."
     overall_success = False # Flag to track if the main workflow steps succeeded
-    user_content = open("user_content.txt", "r").read()
+    user_content = open("./user/user_content.txt", "r").read()
     print(f"found user content: {user_content[:10]}") 
     try:
         if not os.path.exists(ORIGINAL_TEMPLATE_PPTX):
@@ -149,16 +142,21 @@ if __name__ == "__main__":
         elif not run_extraction_step(ORIGINAL_TEMPLATE_PPTX, SLIDE_DETAILS_JSON):
             workflow_status_message = "Workflow aborted at extraction step."
         else:
-            print("\n") 
-            if not placeholder_modify_json_content(SLIDE_DETAILS_JSON, USER_UPDATED_JSON_CONTENT, user_content):
-                workflow_status_message = "Workflow aborted at JSON modification step."
+            print("\n")
+            # Step 1.5: Intelligent slide organization
+            if not intelligent_slide_organization_step(SLIDE_DETAILS_JSON, SLIDE_DETAILS_REORGANIZED_JSON, user_content, GOOGLE_API_KEY, MODEL_NAME):
+                workflow_status_message = "Workflow aborted at slide organization step."
             else:
-                print("\n")
-                if not run_presentation_update_step(ORIGINAL_TEMPLATE_PPTX, FINAL_UPDATED_PPTX, USER_UPDATED_JSON_CONTENT):
-                    workflow_status_message = "Workflow aborted at presentation update step."
+                print("\n") 
+                if not placeholder_modify_json_content(SLIDE_DETAILS_REORGANIZED_JSON, USER_UPDATED_JSON_CONTENT, user_content):
+                    workflow_status_message = "Workflow aborted at JSON modification step."
                 else:
-                    workflow_status_message = "\nPresentation Update Workflow completed successfully!"
-                    overall_success = True # Mark success only if all steps complete
+                    print("\n")
+                    if not run_presentation_update_step(ORIGINAL_TEMPLATE_PPTX, FINAL_UPDATED_PPTX, USER_UPDATED_JSON_CONTENT):
+                        workflow_status_message = "Workflow aborted at presentation update step."
+                    else:
+                        workflow_status_message = "\nPresentation Update Workflow completed successfully!"
+                        overall_success = True # Mark success only if all steps complete
         
         print(workflow_status_message) # Print final status of the core workflow
 
