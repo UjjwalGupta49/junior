@@ -1,0 +1,67 @@
+{
+  "metadata": {
+    "total_templates": 2,
+    "source": "Microsoft Create PowerPoint Templates",
+    "scraped_at": "2025-05-27 12:01:44",
+    "url": "https://create.microsoft.com/en-us/search?filters=powerpoint"
+  },
+  "templates": [
+    {
+      "id": "light-modernist-design-fd6c6e3e-ccdc-4ba4-b6a2-3dbf5a4b5e68",
+      "title": "Light modernist design",
+      "description": "Create an engaging presentation with our versatile 14-slide PowerPoint template. This accessible template is designed to captivate your audience with eye-catching visuals, interactive elements, and professional layouts, making it perfect for delivering impactful presentations.",
+      "category": "Business",
+      "theme": "Modern",
+      "features": [
+        "100% fully customizable template",
+        "Easily change the text, images, and more",
+        "Get creative with thousands of photos, graphics, and fonts",
+        "Dazzle followers with animations, transitions, or videos",
+        "Quickly share and publish anywhere"
+      ],
+      "preview_url": "https://cdn.create.microsoft.com/catalog-assets/en-us/fd6c6e3e-ccdc-4ba4-b6a2-3dbf5a4b5e68/thumbnails/600/light-modernist-design-gray-modern-geometric-linear-1-1-8dcaad0a6025.webp",
+      "download_url": null,
+      "tags": [
+        "modern"
+      ],
+      "color_scheme": "Professional",
+      "layout_types": [
+        "Agenda"
+      ],
+      "difficulty_level": "Intermediate",
+      "use_cases": [
+        "Meeting",
+        "Business Presentation"
+      ]
+    },
+    {
+      "id": "bracket-design-e62b0474-390d-411b-8b30-615e4d67ce60",
+      "title": "Bracket design",
+      "description": "Create impactful presentations with this 14-slide PowerPoint template. Perfect for engaging your audience, this accessible template features sleek designs, customizable layouts, and effective delivery techniques. Ideal for introducing yourself, engaging the audience, and delivering with confidence.",
+      "category": "Business",
+      "theme": "Modern",
+      "features": [
+        "100% fully customizable template",
+        "Easily change the text, images, and more",
+        "Get creative with thousands of photos, graphics, and fonts",
+        "Dazzle followers with animations, transitions, or videos",
+        "Quickly share and publish anywhere"
+      ],
+      "preview_url": "https://cdn.create.microsoft.com/catalog-assets/en-us/e62b0474-390d-411b-8b30-615e4d67ce60/thumbnails/600/bracket-design-blue-modern-simple-1-1-14973471420e.webp",
+      "download_url": null,
+      "tags": [
+        "powerpoint",
+        "template"
+      ],
+      "color_scheme": "Professional",
+      "layout_types": [
+        "Agenda"
+      ],
+      "difficulty_level": "Intermediate",
+      "use_cases": [
+        "Meeting",
+        "Business Presentation"
+      ]
+    }
+  ]
+}

@@ -64,12 +64,33 @@ The script uses Google's Gemini AI (model: `gemini-2.5-flash-preview-05-20`) to 
 - **Modified**: `content/slide_details_updated.json` (AI-updated content)
 - **Output**: `output/template_updated.pptx` (final presentation)
 
+### Directory Organization
+- **`scrapers/`** - Web scraping tools for template collection
+  - `template_scraper.py` - Microsoft PowerPoint template scraper with detailed description extraction
+  - `test_template_scraper.py` - Comprehensive testing suite for scraper functionality
+  - `SERVER_DEPLOYMENT_GUIDE.md` - Production deployment guide for server environments
+- **`content/`** - Generated JSON files and intermediate processing data
+- **`output/`** - Final presentation outputs and generated files
+- **`template/`** - Input PowerPoint template files
+- **`user/`** - User-provided content requirements and configuration
+
 ### Dependencies
 - `extract_slide_details.py` - Extracts slide information from PowerPoint files
 - `intelligent_slide_organizer.py` - AI-powered slide analysis and reorganization
 - `create_presentation_from_reorganized_json.py` - Creates presentations from reorganized data
 - `update_presentation_from_json.py` - Updates PowerPoint files with JSON data
+- `scrapers/` - Web scraping tools for template collection and metadata extraction
 - `google.generativeai` - Google Gemini AI integration
+
+### Directory Structure
+- **`scrapers/`** - Web scraping scripts and tools
+  - `template_scraper.py` - Microsoft PowerPoint template scraper
+  - `test_template_scraper.py` - Scraper testing suite
+  - `SERVER_DEPLOYMENT_GUIDE.md` - Server deployment documentation
+- **`content/`** - Generated JSON files and intermediate data
+- **`output/`** - Final presentation outputs
+- **`template/`** - Input template files
+- **`user/`** - User-provided content and requirements
 
 ## TODOs
 

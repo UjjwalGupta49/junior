@@ -15,10 +15,13 @@ from extract_slide_details import extract_slide_details
 from update_presentation_from_json import update_presentation_from_json
 from intelligent_slide_organizer import intelligent_slide_organization_step
 from create_presentation_from_reorganized_json import create_and_update_reorganized_presentation
+from intelligent_template_selector import template_selection_workflow
 
 # --- Configuration: File Paths ---
 # All paths are relative to the script's location (learning/template/)
-ORIGINAL_TEMPLATE_PPTX = "./template/template.pptx" # The master template
+ORIGINAL_TEMPLATE_PPTX = "./template/template.pptx" # The master template (fallback)
+TEMPLATES_DATABASE_JSON = "./content/microsoft_templates.json" # Scraped templates database
+SELECTED_TEMPLATE_JSON = "./content/selected_template.json" # AI-selected template info
 SLIDE_DETAILS_JSON = "./content/slide_details.json" # Intermediate JSON with extracted details
 SLIDE_DETAILS_REORGANIZED_JSON = "./content/slide_details_reorganized.json" # JSON after intelligent reorganization
 USER_UPDATED_JSON_CONTENT = "./content/slide_details_updated.json" # JSON after user (or placeholder) updates
@@ -126,9 +129,41 @@ def run_presentation_update_step(source_pptx_path, target_pptx_path, updated_jso
         print(f"Failed to create and update reorganized presentation using '{updated_json_path}'.")
     return success
 
+# --- Template Selection Step ---
+def run_template_selection_step(user_content, templates_db_path, api_key, model_name):
+    """Select the best template using AI analysis"""
+    print(f"--- Step 0: Intelligent Template Selection ---")
+    
+    if not os.path.exists(templates_db_path):
+        print(f"Warning: Templates database '{templates_db_path}' not found. Using default template.")
+        return ORIGINAL_TEMPLATE_PPTX
+    
+    try:
+        recommendation = template_selection_workflow(
+            user_content=user_content,
+            templates_db_path=templates_db_path,
+            api_key=api_key,
+            model_name=model_name
+        )
+        
+        if recommendation:
+            # For now, we'll use the fallback template since we don't have actual template files
+            # In a full implementation, you would download/use the selected template
+            print(f"Selected template: {recommendation.template_title}")
+            print(f"Note: Using fallback template for now. Template download feature to be implemented.")
+            return ORIGINAL_TEMPLATE_PPTX
+        else:
+            print("Template selection failed. Using default template.")
+            return ORIGINAL_TEMPLATE_PPTX
+            
+    except Exception as e:
+        print(f"Error during template selection: {e}")
+        print("Falling back to default template.")
+        return ORIGINAL_TEMPLATE_PPTX
+
 # --- Main Workflow Execution ---
 if __name__ == "__main__":
-    print("Starting Presentation Update Workflow...")
+    print("Starting Enhanced Presentation Update Workflow with AI Template Selection...")
     print(f"Working directory: {os.getcwd()}")
 
     pycache_dir_name = "__pycache__" # Name of the directory to be cleaned up
@@ -136,10 +171,18 @@ if __name__ == "__main__":
     overall_success = False # Flag to track if the main workflow steps succeeded
     user_content = open("./user/user_content.txt", "r").read()
     print(f"found user content: {user_content[:10]}") 
+    
     try:
-        if not os.path.exists(ORIGINAL_TEMPLATE_PPTX):
-            workflow_status_message = f"Error: Original template '{ORIGINAL_TEMPLATE_PPTX}' not found. Please ensure it exists in the script's directory."
-        elif not run_extraction_step(ORIGINAL_TEMPLATE_PPTX, SLIDE_DETAILS_JSON):
+        # Step 0: Intelligent Template Selection
+        selected_template_path = run_template_selection_step(
+            user_content, TEMPLATES_DATABASE_JSON, GOOGLE_API_KEY, MODEL_NAME
+        )
+        print(f"Using template: {selected_template_path}")
+        print("\n")
+        
+        if not os.path.exists(selected_template_path):
+            workflow_status_message = f"Error: Selected template '{selected_template_path}' not found."
+        elif not run_extraction_step(selected_template_path, SLIDE_DETAILS_JSON):
             workflow_status_message = "Workflow aborted at extraction step."
         else:
             print("\n")
@@ -152,10 +195,10 @@ if __name__ == "__main__":
                     workflow_status_message = "Workflow aborted at JSON modification step."
                 else:
                     print("\n")
-                    if not run_presentation_update_step(ORIGINAL_TEMPLATE_PPTX, FINAL_UPDATED_PPTX, USER_UPDATED_JSON_CONTENT):
+                    if not run_presentation_update_step(selected_template_path, FINAL_UPDATED_PPTX, USER_UPDATED_JSON_CONTENT):
                         workflow_status_message = "Workflow aborted at presentation update step."
                     else:
-                        workflow_status_message = "\nPresentation Update Workflow completed successfully!"
+                        workflow_status_message = "\nEnhanced Presentation Update Workflow completed successfully!"
                         overall_success = True # Mark success only if all steps complete
         
         print(workflow_status_message) # Print final status of the core workflow
