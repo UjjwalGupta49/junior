@@ -5,10 +5,87 @@
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
+*.so
+
+# Template Management Package cache
+scripts/template_management/__pycache__/
 
 # macOS files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 
 # Output and temporary files
 scripts/output/*.pptx
 scripts/content/*.json
+scripts/template/*.pptx
+scripts/template/downloaded_templates/*.pptx
+scripts/user/*.txt
+
+# Template selection results (generated files)
+scripts/scrapers/content/dual_template_selections.json
+scripts/scrapers/content/template_selections.json
+
+# Download reports and logs
+scripts/template/simple_download_report.txt
+scripts/template/download_report.txt
+scripts/template_management/download_report.txt
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# PyCharm
+.idea/
+
+# Virtual environment
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Logs
+*.log
+logs/
+scripts/logs/
+
+# Temporary presentation files
+scripts/output/presentation_template_*.pptx
+scripts/output/template_updated.pptx
+
+# Chrome driver downloads and cache
+scripts/template_management/chromedriver*
+scripts/chromedriver*
+
+# Selenium artifacts
+selenium-debug.log
+geckodriver.log

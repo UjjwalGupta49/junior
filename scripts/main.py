@@ -3,68 +3,268 @@ import shutil
 import json
 import google.generativeai as genai
 from dotenv import load_dotenv
+from pathlib import Path
+from typing import List, Dict, Optional
 
 # Load environment variables from .env file
 load_dotenv()
 
-# Assuming extract_slide_details.py and update_presentation_from_json.py are in the same directory
-# and can be imported directly by Python's module search path.
-# If they are in a subdirectory or need specific path manipulation, adjust sys.path if necessary, 
-# but for sibling files, direct import should work if the CWD is this directory.
+# Import all the required modules for the complete workflow
 from extract_slide_details import extract_slide_details
-from update_presentation_from_json import update_presentation_from_json
 from intelligent_slide_organizer import intelligent_slide_organization_step
 from create_presentation_from_reorganized_json import create_and_update_reorganized_presentation
-from intelligent_template_selector import template_selection_workflow
+from template_management import select_dual_templates, TemplateMatch, ImprovedTemplateDownloader
 
 # --- Configuration: File Paths ---
-# All paths are relative to the script's location (learning/template/)
-ORIGINAL_TEMPLATE_PPTX = "./template/template.pptx" # The master template (fallback)
-TEMPLATES_DATABASE_JSON = "./content/microsoft_templates.json" # Scraped templates database
-SELECTED_TEMPLATE_JSON = "./content/selected_template.json" # AI-selected template info
-SLIDE_DETAILS_JSON = "./content/slide_details.json" # Intermediate JSON with extracted details
-SLIDE_DETAILS_REORGANIZED_JSON = "./content/slide_details_reorganized.json" # JSON after intelligent reorganization
-USER_UPDATED_JSON_CONTENT = "./content/slide_details_updated.json" # JSON after user (or placeholder) updates
-FINAL_UPDATED_PPTX = "./output/template_updated.pptx" # Final presentation with content updates
+# Updated paths to match the actual codebase structure
+TEMPLATES_DATABASE_JSON = "./scrapers/content/microsoft_templates.json"  # Microsoft templates database
+DUAL_TEMPLATE_SELECTIONS_JSON = "./scrapers/content/dual_template_selections.json"  # AI-selected templates
+DOWNLOADED_TEMPLATES_DIR = "./template/downloaded_templates"  # Where downloaded templates are stored
+CONTENT_DIR = "./content"  # Directory for intermediate JSON files
+OUTPUT_DIR = "./output"  # Directory for final presentations
+USER_CONTENT_FILE = "./user/user_content.txt"  # User content input file
 
 # --- Gemini AI Configuration ---
-# Load API key and model configuration from environment variables
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-MODEL_NAME = os.getenv("MODEL_NAME", "gemini-2.5-flash-preview-05-20")  # Default fallback
+MODEL_NAME = os.getenv("MODEL_NAME", "gemini-2.5-flash-preview-05-20")
 
 # Validate that required environment variables are set
 if not GOOGLE_API_KEY:
     raise ValueError("GOOGLE_API_KEY environment variable is required. Please set it in your .env file.")
 
-# --- 1. Extract Slide Details ---
-def run_extraction_step(input_pptx_path, output_json_path):
-    """Extracts details from the presentation and saves them to a JSON file."""
-    print(f"--- Step 1: Extracting slide details from '{input_pptx_path}' ---")
-    details = extract_slide_details(input_pptx_path)
-    if details:
-        try:
-            with open(output_json_path, 'w') as f:
-                json.dump(details, f, indent=4)
-            print(f"Successfully extracted details to '{output_json_path}'")
-            return True
-        except IOError as e:
-            print(f"Error writing JSON to '{output_json_path}': {e}")
+def ensure_directories_exist():
+    """Ensure all required directories exist"""
+    directories = [CONTENT_DIR, OUTPUT_DIR, DOWNLOADED_TEMPLATES_DIR]
+    for directory in directories:
+        Path(directory).mkdir(parents=True, exist_ok=True)
+
+def load_user_content() -> str:
+    """Load user content from file"""
+    try:
+        if os.path.exists(USER_CONTENT_FILE):
+            with open(USER_CONTENT_FILE, 'r', encoding='utf-8') as f:
+                content = f.read().strip()
+            print(f"📝 Loaded user content ({len(content)} characters)")
+            return content
+        else:
+            print(f"❌ User content file not found: {USER_CONTENT_FILE}")
+            return ""
+    except Exception as e:
+        print(f"❌ Error loading user content: {e}")
+        return ""
+
+def run_dual_template_selection(user_content: str) -> List[TemplateMatch]:
+    """
+    Step 1: Select two best templates using AI analysis
+    
+    Args:
+        user_content: User's presentation content
+        
+    Returns:
+        List of selected TemplateMatch objects
+    """
+    print("=" * 80)
+    print("🎯 STEP 1: DUAL TEMPLATE SELECTION")
+    print("=" * 80)
+    
+    try:
+        # Run dual template selection
+        matches = select_dual_templates(
+            user_content=user_content,
+            templates_db_path=TEMPLATES_DATABASE_JSON,
+            user_requirements="",
+            api_key=GOOGLE_API_KEY,
+            model_name=MODEL_NAME,
+            verbose=True,
+            save_results=True
+        )
+        
+        if matches and len(matches) >= 2:
+            print(f"✅ Successfully selected {len(matches)} templates:")
+            for i, match in enumerate(matches, 1):
+                print(f"   {i}. {match.template_title} (confidence: {match.confidence_score:.1%})")
+            return matches
+        else:
+            print(f"❌ Template selection failed or insufficient templates found")
+            return []
+            
+    except Exception as e:
+        print(f"❌ Error during template selection: {e}")
+        return []
+
+def run_template_download(selections_file: str) -> bool:
+    """
+    Step 2: Download selected templates using headless Chrome
+    
+    Args:
+        selections_file: Path to the template selections JSON file
+        
+    Returns:
+        True if download was successful
+    """
+    print("=" * 80)
+    print("🔽 STEP 2: TEMPLATE DOWNLOAD")
+    print("=" * 80)
+    
+    try:
+        # Initialize headless Chrome downloader (server-optimized)
+        downloader = ImprovedTemplateDownloader(
+            output_dir="./template",
+            headless=True,  # Server-side headless mode
+            timeout=45
+        )
+        
+        # Load templates from selections
+        templates = downloader.load_template_selections(selections_file)
+        
+        if not templates:
+            print("❌ No templates found in selections file")
             return False
-    else:
-        print(f"Failed to extract details from '{input_pptx_path}'.")
+        
+        print(f"📋 Found {len(templates)} templates to download:")
+        for i, template in enumerate(templates, 1):
+            print(f"   {i}. {template.template_title}")
+        
+        # Download templates
+        stats = downloader.download_templates(templates)
+        
+        # Generate report
+        report = downloader.generate_download_report(templates, stats)
+        print("\n" + report)
+        
+        success = stats["completed"] > 0
+        if success:
+            print(f"✅ Successfully downloaded {stats['completed']}/{stats['total']} templates")
+        else:
+            print(f"❌ Failed to download templates")
+        
+        return success
+        
+    except Exception as e:
+        print(f"❌ Error during template download: {e}")
         return False
 
-# --- 2. Placeholder for Updating JSON Content ---
-def placeholder_modify_json_content(reorganized_json_path, updated_json_path, user_content):
-    """
-    Modifies JSON content using Gemini AI.
-    Loads content from reorganized_json_path, sends it to Gemini AI for modification,
-    and saves the result to updated_json_path.
-    """
-    print(f"--- Step 3: Modifying JSON content using Gemini AI ---")
+def get_downloaded_template_paths() -> List[str]:
+    """Get paths to all downloaded template files"""
     try:
-        with open(reorganized_json_path, 'r') as f_orig:
-            original_data = json.load(f_orig)
+        template_dir = Path(DOWNLOADED_TEMPLATES_DIR)
+        if not template_dir.exists():
+            return []
+        
+        template_files = list(template_dir.glob("*.pptx"))
+        template_paths = [str(f) for f in template_files]
+        
+        print(f"📁 Found {len(template_paths)} downloaded templates:")
+        for i, path in enumerate(template_paths, 1):
+            filename = os.path.basename(path)
+            print(f"   {i}. {filename}")
+        
+        return template_paths
+        
+    except Exception as e:
+        print(f"❌ Error getting template paths: {e}")
+        return []
+
+def process_single_template(template_path: str, template_index: int, user_content: str) -> bool:
+    """
+    Process a single template through the complete workflow:
+    - Extract slide details
+    - Reorganize slides
+    - Add content
+    - Create final presentation
+    
+    Args:
+        template_path: Path to the template file
+        template_index: Index of the template (1 or 2)
+        user_content: User's presentation content
+        
+    Returns:
+        True if processing was successful
+    """
+    template_name = os.path.splitext(os.path.basename(template_path))[0]
+    
+    print(f"\n📋 PROCESSING TEMPLATE {template_index}: {template_name}")
+    print("-" * 60)
+    
+    # Define file paths for this template
+    slide_details_json = f"{CONTENT_DIR}/slide_details_template_{template_index}.json"
+    reorganized_json = f"{CONTENT_DIR}/slide_details_reorganized_template_{template_index}.json"
+    updated_json = f"{CONTENT_DIR}/slide_details_updated_template_{template_index}.json"
+    final_output = f"{OUTPUT_DIR}/presentation_template_{template_index}_{template_name}.pptx"
+    
+    try:
+        # Step 3.1: Extract slide details
+        print(f"🔍 Step 3.{template_index}.1: Extracting slide details...")
+        details = extract_slide_details(template_path)
+        
+        if not details:
+            print(f"❌ Failed to extract details from template {template_index}")
+            return False
+        
+        with open(slide_details_json, 'w', encoding='utf-8') as f:
+            json.dump(details, f, indent=4)
+        print(f"✅ Extracted {len(details)} slides to {slide_details_json}")
+        
+        # Step 3.2: Reorganize slides based on user content
+        print(f"🔄 Step 3.{template_index}.2: Reorganizing slides...")
+        reorganize_success = intelligent_slide_organization_step(
+            slide_details_json, 
+            reorganized_json, 
+            user_content, 
+            GOOGLE_API_KEY, 
+            MODEL_NAME
+        )
+        
+        if not reorganize_success:
+            print(f"❌ Failed to reorganize slides for template {template_index}")
+            return False
+        
+        print(f"✅ Slides reorganized and saved to {reorganized_json}")
+        
+        # Step 3.3: Add content to slides using AI
+        print(f"✨ Step 3.{template_index}.3: Adding content with AI...")
+        content_success = modify_json_content_with_ai(reorganized_json, updated_json, user_content)
+        
+        if not content_success:
+            print(f"❌ Failed to add content for template {template_index}")
+            return False
+        
+        print(f"✅ Content added and saved to {updated_json}")
+        
+        # Step 3.4: Create final presentation
+        print(f"🎯 Step 3.{template_index}.4: Creating final presentation...")
+        presentation_success = create_and_update_reorganized_presentation(
+            template_path, 
+            updated_json, 
+            final_output
+        )
+        
+        if presentation_success:
+            print(f"✅ Final presentation created: {final_output}")
+            return True
+        else:
+            print(f"❌ Failed to create final presentation for template {template_index}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Error processing template {template_index}: {e}")
+        return False
+
+def modify_json_content_with_ai(input_json_path: str, output_json_path: str, user_content: str) -> bool:
+    """
+    Modify JSON content using Gemini AI to add relevant content
+    
+    Args:
+        input_json_path: Path to input JSON file
+        output_json_path: Path to save modified JSON
+        user_content: User's presentation content
+        
+    Returns:
+        True if successful
+    """
+    try:
+        with open(input_json_path, 'r', encoding='utf-8') as f:
+            original_data = json.load(f)
         
         original_json_string = json.dumps(original_data, indent=2)
 
@@ -72,182 +272,199 @@ def placeholder_modify_json_content(reorganized_json_path, updated_json_path, us
         model = genai.GenerativeModel(MODEL_NAME)
 
         prompt = f"""
-I want to udpate the existing content of the slides in the JSON file to create a presentation.
-I want to create a presentation about this content: ${user_content}
-The text you add should be relevant to the content, theme tone and style of the presentation.
+I want to update the existing content of the slides in the JSON file to create a presentation.
+I want to create a presentation about this content: {user_content}
+
+The text you add should be relevant to the content, theme, tone and style of the presentation.
 Keep the text concise and to the point, avoid writing long paragraphs and prefer concise bullet points using \\n to create new lines.
 The JSON data represents a list of slides, and each slide contains shapes with text.
-Your task is to make creative and relevant modification to the text content in the provided JSON as per the requirements of presentation.
- 
+Your task is to make creative and relevant modifications to the text content in the provided JSON as per the requirements of the presentation.
 
 Here is the JSON data:
 ```json
 {original_json_string}
 ```
 
-Return the ENTIRE JSON data with your modification. 
+Return the ENTIRE JSON data with your modifications. 
 Ensure your output is ONLY the modified JSON data, valid and parsable, starting with `[` and ending with `]`.
 Do not include any explanatory text or markdown formatting like ```json before or after the JSON output.
 """
-        print("Sending content to Gemini AI for modification...")
+        
         response = model.generate_content(prompt)
         
         # Clean the response: remove potential markdown code block fences
         modified_json_string = response.text.strip()
         if modified_json_string.startswith("```json"):
             modified_json_string = modified_json_string[7:]
+        if modified_json_string.startswith("```"):
+            modified_json_string = modified_json_string[3:]
         if modified_json_string.endswith("```"):
             modified_json_string = modified_json_string[:-3]
         
         modified_data = json.loads(modified_json_string.strip())
 
-        with open(updated_json_path, 'w') as f_upd:
-            json.dump(modified_data, f_upd, indent=4)
-        print(f"Successfully modified JSON content using Gemini AI and saved to '{updated_json_path}'")
+        with open(output_json_path, 'w', encoding='utf-8') as f:
+            json.dump(modified_data, f, indent=4)
+        
         return True
 
-    except FileNotFoundError:
-        print(f"Error: Reorganized JSON '{reorganized_json_path}' not found for modification.")
-        return False
     except Exception as e:
-        print(f"Error during Gemini AI JSON modification: {e}")
-        if 'response' in locals() and hasattr(response, 'text'):
-            print("--- Raw LLM Response Text That May Have Caused Error ---")
-            print(response.text)
-            print("-------------------------------------------------------")
+        print(f"❌ Error during AI content modification: {e}")
         return False
 
-# --- 3. Update Presentation from JSON ---
-def run_presentation_update_step(source_pptx_path, target_pptx_path, updated_json_path):
-    """Creates a reorganized presentation and updates it using the modified JSON file."""
-    print(f"--- Step 4: Creating and updating reorganized presentation ---")
-    # Use the new reorganized presentation creation function
-    success = create_and_update_reorganized_presentation(source_pptx_path, updated_json_path, target_pptx_path)
-    if success:
-        print(f"Reorganized presentation creation and update based on '{updated_json_path}' completed.")
-    else:
-        print(f"Failed to create and update reorganized presentation using '{updated_json_path}'.")
-    return success
-
-# --- Template Selection Step ---
-def run_template_selection_step(user_content, templates_db_path, api_key, model_name):
-    """Select the best template using AI analysis"""
-    print(f"--- Step 0: Intelligent Template Selection ---")
+def run_template_processing_workflow(user_content: str) -> Dict[str, bool]:
+    """
+    Step 3: Process all downloaded templates through the complete workflow
     
-    if not os.path.exists(templates_db_path):
-        print(f"Warning: Templates database '{templates_db_path}' not found. Using default template.")
-        return ORIGINAL_TEMPLATE_PPTX
+    Args:
+        user_content: User's presentation content
+        
+    Returns:
+        Dictionary with processing results for each template
+    """
+    print("=" * 80)
+    print("⚙️  STEP 3: TEMPLATE PROCESSING WORKFLOW")
+    print("=" * 80)
+    
+    # Get downloaded template paths
+    template_paths = get_downloaded_template_paths()
+    
+    if not template_paths:
+        print("❌ No downloaded templates found")
+        return {}
+    
+    results = {}
+    
+    # Process each template
+    for i, template_path in enumerate(template_paths, 1):
+        template_name = os.path.basename(template_path)
+        print(f"\n🔄 Processing template {i}/{len(template_paths)}: {template_name}")
+        
+        success = process_single_template(template_path, i, user_content)
+        results[template_name] = success
+        
+        if success:
+            print(f"✅ Template {i} processed successfully")
+        else:
+            print(f"❌ Template {i} processing failed")
+    
+    return results
+
+def cleanup_intermediate_files():
+    """Clean up intermediate files and cache"""
+    print("\n🧹 CLEANUP")
+    print("-" * 30)
     
     try:
-        recommendation = template_selection_workflow(
-            user_content=user_content,
-            templates_db_path=templates_db_path,
-            api_key=api_key,
-            model_name=model_name
-        )
+        # Clean up __pycache__ directories
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        pycache_path = os.path.join(script_dir, "__pycache__")
         
-        if recommendation:
-            # For now, we'll use the fallback template since we don't have actual template files
-            # In a full implementation, you would download/use the selected template
-            print(f"Selected template: {recommendation.template_title}")
-            print(f"Note: Using fallback template for now. Template download feature to be implemented.")
-            return ORIGINAL_TEMPLATE_PPTX
-        else:
-            print("Template selection failed. Using default template.")
-            return ORIGINAL_TEMPLATE_PPTX
-            
+        if os.path.exists(pycache_path):
+            shutil.rmtree(pycache_path)
+            print(f"✅ Removed {pycache_path}")
+        
+        # Clean up any additional cache directories
+        current_dir = os.getcwd()
+        current_pycache = os.path.join(current_dir, "__pycache__")
+        
+        if os.path.exists(current_pycache) and current_pycache != pycache_path:
+            shutil.rmtree(current_pycache)
+            print(f"✅ Removed {current_pycache}")
+        
+        print("✅ Cleanup completed")
+        
     except Exception as e:
-        print(f"Error during template selection: {e}")
-        print("Falling back to default template.")
-        return ORIGINAL_TEMPLATE_PPTX
+        print(f"⚠️  Cleanup warning: {e}")
+
+def display_final_summary(template_results: Dict[str, bool]):
+    """Display final workflow summary"""
+    print("\n" + "=" * 80)
+    print("🎉 WORKFLOW COMPLETED")
+    print("=" * 80)
+    
+    total_templates = len(template_results)
+    successful_templates = sum(1 for success in template_results.values() if success)
+    
+    print(f"📊 SUMMARY:")
+    print(f"   Total templates processed: {total_templates}")
+    print(f"   Successful: {successful_templates}")
+    print(f"   Failed: {total_templates - successful_templates}")
+    
+    print(f"\n📋 DETAILED RESULTS:")
+    for template_name, success in template_results.items():
+        status = "✅ SUCCESS" if success else "❌ FAILED"
+        print(f"   {status}: {template_name}")
+    
+    if successful_templates > 0:
+        print(f"\n📁 OUTPUT LOCATION:")
+        print(f"   Final presentations saved in: {OUTPUT_DIR}/")
+        
+        # List generated files
+        output_path = Path(OUTPUT_DIR)
+        if output_path.exists():
+            output_files = list(output_path.glob("presentation_template_*.pptx"))
+            for file_path in output_files:
+                print(f"   - {file_path.name}")
+    
+    print(f"\n🎯 WORKFLOW STATUS: {'SUCCESS' if successful_templates > 0 else 'FAILED'}")
 
 # --- Main Workflow Execution ---
-if __name__ == "__main__":
-    print("Starting Enhanced Presentation Update Workflow with AI Template Selection...")
+def main():
+    """Main workflow execution"""
+    print("🚀 JUNIORAI COMPLETE PRESENTATION WORKFLOW")
+    print("=" * 80)
+    print("Workflow: AI Template Selection → Download → Process Both Templates")
     print(f"Working directory: {os.getcwd()}")
-
-    pycache_dir_name = "__pycache__" # Name of the directory to be cleaned up
-    workflow_status_message = "Workflow did not complete successfully."
-    overall_success = False # Flag to track if the main workflow steps succeeded
-    user_content = open("./user/user_content.txt", "r").read()
-    print(f"found user content: {user_content[:10]}") 
+    print("=" * 80)
+    
+    overall_success = False
+    template_results = {}
     
     try:
-        # Step 0: Intelligent Template Selection
-        selected_template_path = run_template_selection_step(
-            user_content, TEMPLATES_DATABASE_JSON, GOOGLE_API_KEY, MODEL_NAME
-        )
-        print(f"Using template: {selected_template_path}")
-        print("\n")
+        # Ensure required directories exist
+        ensure_directories_exist()
         
-        if not os.path.exists(selected_template_path):
-            workflow_status_message = f"Error: Selected template '{selected_template_path}' not found."
-        elif not run_extraction_step(selected_template_path, SLIDE_DETAILS_JSON):
-            workflow_status_message = "Workflow aborted at extraction step."
-        else:
-            print("\n")
-            # Step 1.5: Intelligent slide organization
-            if not intelligent_slide_organization_step(SLIDE_DETAILS_JSON, SLIDE_DETAILS_REORGANIZED_JSON, user_content, GOOGLE_API_KEY, MODEL_NAME):
-                workflow_status_message = "Workflow aborted at slide organization step."
-            else:
-                print("\n") 
-                if not placeholder_modify_json_content(SLIDE_DETAILS_REORGANIZED_JSON, USER_UPDATED_JSON_CONTENT, user_content):
-                    workflow_status_message = "Workflow aborted at JSON modification step."
-                else:
-                    print("\n")
-                    if not run_presentation_update_step(selected_template_path, FINAL_UPDATED_PPTX, USER_UPDATED_JSON_CONTENT):
-                        workflow_status_message = "Workflow aborted at presentation update step."
-                    else:
-                        workflow_status_message = "\nEnhanced Presentation Update Workflow completed successfully!"
-                        overall_success = True # Mark success only if all steps complete
+        # Load user content
+        user_content = load_user_content()
+        if not user_content:
+            print("❌ No user content available. Workflow cannot proceed.")
+            return
         
-        print(workflow_status_message) # Print final status of the core workflow
-
+        print(f"📝 User content preview: {user_content[:100]}{'...' if len(user_content) > 100 else ''}")
+        
+        # Step 1: Select two best templates using AI
+        template_matches = run_dual_template_selection(user_content)
+        if not template_matches:
+            print("❌ Template selection failed. Workflow aborted.")
+            return
+        
+        # Step 2: Download selected templates
+        download_success = run_template_download(DUAL_TEMPLATE_SELECTIONS_JSON)
+        if not download_success:
+            print("❌ Template download failed. Workflow aborted.")
+            return
+        
+        # Step 3: Process both templates through complete workflow
+        template_results = run_template_processing_workflow(user_content)
+        
+        if template_results:
+            overall_success = any(template_results.values())
+        
     except Exception as e:
-        print(f"An unexpected error occurred during the main workflow: {e}")
-        # workflow_status_message will reflect the last failure or the generic error
+        print(f"❌ Unexpected error in main workflow: {e}")
+    
     finally:
-        print("\n--- Starting Cleanup --- ")
-        # Construct path to __pycache__ relative to the script's directory
-        # __file__ might not be defined if run in some environments (e.g. exec), so fallback to CWD
-        try:
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-        except NameError: # __file__ is not defined
-            script_dir = os.getcwd()
+        # Always clean up and show summary
+        cleanup_intermediate_files()
         
-        pycache_path_in_script_dir = os.path.join(script_dir, pycache_dir_name)
-
-        # Check in script's directory
-        if os.path.exists(pycache_path_in_script_dir):
-            try:
-                shutil.rmtree(pycache_path_in_script_dir)
-                print(f"Successfully removed '{pycache_path_in_script_dir}'.")
-            except OSError as e:
-                print(f"Error removing '{pycache_path_in_script_dir}': {e}")
-            except Exception as e:
-                print(f"An unexpected error during '{pycache_path_in_script_dir}' cleanup: {e}")
+        if template_results:
+            display_final_summary(template_results)
+        
+        if overall_success:
+            print("\n🎉 JuniorAI workflow completed successfully!")
         else:
-            print(f"Directory '{pycache_path_in_script_dir}' not found (checked in script's dir). No cleanup needed for it there.")
+            print("\n😞 JuniorAI workflow failed to complete successfully.")
 
-        # Additionally, check if __pycache__ is in CWD, if CWD is different from script_dir
-        # This covers cases where __pycache__ might be created based on CWD rather than script location.
-        current_working_dir = os.getcwd()
-        if script_dir != current_working_dir:
-            pycache_path_in_cwd = os.path.join(current_working_dir, pycache_dir_name)
-            if os.path.exists(pycache_path_in_cwd):
-                try:
-                    shutil.rmtree(pycache_path_in_cwd)
-                    print(f"Successfully removed '{pycache_path_in_cwd}' (found in CWD).")
-                except OSError as e:
-                    print(f"Error removing '{pycache_path_in_cwd}' from CWD: {e}")
-                except Exception as e:
-                    print(f"An unexpected error during '{pycache_path_in_cwd}' (CWD) cleanup: {e}")
-            else:
-                print(f"Directory '{pycache_path_in_cwd}' also not found in CWD '{current_working_dir}'.")
-
-        print("--- Cleanup Finished --- ")
-
-    # If you need to signal overall success/failure to an external process:
-    # if not overall_success:
-    #     import sys
-    #     sys.exit(1) 
+if __name__ == "__main__":
+    main() 

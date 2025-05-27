@@ -1,3 +1,7 @@
 google-generativeai
 python-dotenv
 python-pptx
+selenium
+beautifulsoup4
+requests
+webdriver-manager
