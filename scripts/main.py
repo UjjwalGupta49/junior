@@ -1,6 +1,7 @@
 import os
 import shutil
 import json
+import argparse
 import google.generativeai as genai
 from dotenv import load_dotenv
 from pathlib import Path
@@ -14,6 +15,7 @@ from extract_slide_details import extract_slide_details
 from intelligent_slide_organizer import intelligent_slide_organization_step
 from create_presentation_from_reorganized_json import create_and_update_reorganized_presentation
 from template_management import select_dual_templates, TemplateMatch, ImprovedTemplateDownloader
+from content_verification import verify_presentation_content
 
 # --- Configuration: File Paths ---
 # Updated paths to match the actual codebase structure
@@ -165,7 +167,7 @@ def get_downloaded_template_paths() -> List[str]:
         print(f"❌ Error getting template paths: {e}")
         return []
 
-def process_single_template(template_path: str, template_index: int, user_content: str) -> bool:
+def process_single_template(template_path: str, template_index: int, user_content: str, auto_fix: bool) -> bool:
     """
     Process a single template through the complete workflow:
     - Extract slide details
@@ -177,6 +179,7 @@ def process_single_template(template_path: str, template_index: int, user_conten
         template_path: Path to the template file
         template_index: Index of the template (1 or 2)
         user_content: User's presentation content
+        auto_fix: Whether to automatically fix critical content issues
         
     Returns:
         True if processing was successful
@@ -241,7 +244,56 @@ def process_single_template(template_path: str, template_index: int, user_conten
         
         if presentation_success:
             print(f"✅ Final presentation created: {final_output}")
-            return True
+            
+            # Step 3.5: Verify content was correctly applied
+            print(f"🔍 Step 3.{template_index}.5: Verifying content application...")
+            verification_result = verify_presentation_content(final_output, updated_json, debug=False, auto_fix_critical=auto_fix)
+            
+            if verification_result.overall_status == "pass":
+                print(f"✅ Content verification passed ({verification_result.success_rate:.1f}% success rate)")
+                
+                # Show auto-fix summary if it was used
+                if auto_fix and verification_result.repair_results:
+                    successful_repairs = sum(1 for r in verification_result.repair_results if r.repair_successful)
+                    total_critical = len(verification_result.repair_results)
+                    if successful_repairs > 0:
+                        improvement = (verification_result.post_repair_success_rate or verification_result.success_rate) - verification_result.success_rate
+                        print(f"🔧 Auto-fix: {successful_repairs}/{total_critical} critical issues resolved (+{improvement:.1f}%)")
+                
+                return True
+            elif verification_result.overall_status == "warning":
+                print(f"⚠️  Content verification passed with warnings ({verification_result.success_rate:.1f}% success rate)")
+                print(f"   Found {len(verification_result.mismatches)} minor issues")
+                
+                # Show auto-fix summary if it was used
+                if auto_fix and verification_result.repair_results:
+                    successful_repairs = sum(1 for r in verification_result.repair_results if r.repair_successful)
+                    total_critical = len(verification_result.repair_results)
+                    if successful_repairs > 0:
+                        improvement = (verification_result.post_repair_success_rate or verification_result.success_rate) - verification_result.success_rate
+                        print(f"🔧 Auto-fix: {successful_repairs}/{total_critical} critical issues resolved (+{improvement:.1f}%)")
+                
+                return True  # Still consider successful but with warnings
+            else:
+                print(f"❌ Content verification failed ({verification_result.success_rate:.1f}% success rate)")
+                print(f"   Found {len(verification_result.mismatches)} critical issues")
+                critical_issues = sum(1 for m in verification_result.mismatches if m.severity == "critical")
+                print(f"   Critical issues: {critical_issues}")
+                
+                # Show auto-fix summary if it was used  
+                if auto_fix and verification_result.repair_results:
+                    successful_repairs = sum(1 for r in verification_result.repair_results if r.repair_successful)
+                    total_critical = len(verification_result.repair_results)
+                    if successful_repairs > 0:
+                        improvement = (verification_result.post_repair_success_rate or verification_result.success_rate) - verification_result.success_rate
+                        print(f"🔧 Auto-fix attempted: {successful_repairs}/{total_critical} critical issues resolved (+{improvement:.1f}%)")
+                        remaining_critical = sum(1 for m in (verification_result.post_repair_mismatches or []) if m.severity == "critical")
+                        print(f"   Remaining critical issues: {remaining_critical}")
+                    else:
+                        print(f"🔧 Auto-fix attempted but failed to resolve critical issues")
+                
+                # Still return True as presentation was created, but user is warned about content issues
+                return True
         else:
             print(f"❌ Failed to create final presentation for template {template_index}")
             return False
@@ -287,6 +339,7 @@ Here is the JSON data:
 
 Return the ENTIRE JSON data with your modifications. 
 Ensure your output is ONLY the modified JSON data, valid and parsable, starting with `[` and ending with `]`.
+Do not include any markdown in the text you write, just the JSON data with text content. Avoid the the usage of **bold** or *italic* or any other markdown formatting for text content.
 Do not include any explanatory text or markdown formatting like ```json before or after the JSON output.
 """
         
@@ -312,12 +365,13 @@ Do not include any explanatory text or markdown formatting like ```json before o
         print(f"❌ Error during AI content modification: {e}")
         return False
 
-def run_template_processing_workflow(user_content: str) -> Dict[str, bool]:
+def run_template_processing_workflow(user_content: str, auto_fix: bool) -> Dict[str, bool]:
     """
     Step 3: Process all downloaded templates through the complete workflow
     
     Args:
         user_content: User's presentation content
+        auto_fix: Whether to automatically fix critical content issues
         
     Returns:
         Dictionary with processing results for each template
@@ -340,7 +394,7 @@ def run_template_processing_workflow(user_content: str) -> Dict[str, bool]:
         template_name = os.path.basename(template_path)
         print(f"\n🔄 Processing template {i}/{len(template_paths)}: {template_name}")
         
-        success = process_single_template(template_path, i, user_content)
+        success = process_single_template(template_path, i, user_content, auto_fix)
         results[template_name] = success
         
         if success:
@@ -377,6 +431,117 @@ def cleanup_intermediate_files():
     except Exception as e:
         print(f"⚠️  Cleanup warning: {e}")
 
+def cleanup_downloaded_templates():
+    """Clean up downloaded template files"""
+    print("\n🗑️  TEMPLATE CLEANUP")
+    print("-" * 30)
+    
+    try:
+        template_dir = Path(DOWNLOADED_TEMPLATES_DIR)
+        if not template_dir.exists():
+            print(f"📁 Template directory does not exist: {DOWNLOADED_TEMPLATES_DIR}")
+            return
+        
+        # Find all .pptx files in the downloaded templates directory
+        pptx_files = list(template_dir.glob("*.pptx"))
+        
+        if not pptx_files:
+            print(f"📁 No .pptx files found in {DOWNLOADED_TEMPLATES_DIR}")
+            return
+        
+        print(f"🔍 Found {len(pptx_files)} template files to delete:")
+        
+        # Delete each .pptx file
+        deleted_count = 0
+        for pptx_file in pptx_files:
+            try:
+                file_size = pptx_file.stat().st_size / (1024 * 1024)  # Size in MB
+                pptx_file.unlink()  # Delete the file
+                deleted_count += 1
+                print(f"   ✅ Deleted: {pptx_file.name} ({file_size:.1f} MB)")
+            except Exception as e:
+                print(f"   ❌ Failed to delete {pptx_file.name}: {e}")
+        
+        print(f"🗑️  Template cleanup completed: {deleted_count}/{len(pptx_files)} files deleted")
+        
+        # Calculate space freed (estimate)
+        if deleted_count > 0:
+            print(f"💾 Freed up storage space from downloaded templates")
+        
+    except Exception as e:
+        print(f"❌ Error during template cleanup: {e}")
+
+def cleanup_all_generated_files():
+    """Clean up ALL generated files from content, output, and downloaded_templates directories"""
+    print("\n🗑️  COMPREHENSIVE CLEANUP (ALL GENERATED FILES)")
+    print("-" * 50)
+    
+    total_deleted = 0
+    total_size_freed = 0.0
+    
+    directories_to_clean = [
+        (CONTENT_DIR, "Content files (JSON intermediates)"),
+        (OUTPUT_DIR, "Output files (Final presentations)"),
+        (DOWNLOADED_TEMPLATES_DIR, "Downloaded templates")
+    ]
+    
+    for directory, description in directories_to_clean:
+        try:
+            dir_path = Path(directory)
+            if not dir_path.exists():
+                print(f"📁 {description}: Directory does not exist - {directory}")
+                continue
+            
+            # Get all files in the directory
+            all_files = [f for f in dir_path.iterdir() if f.is_file()]
+            
+            if not all_files:
+                print(f"📁 {description}: No files to delete - {directory}")
+                continue
+            
+            print(f"\n🔍 {description} ({len(all_files)} files):")
+            
+            deleted_count = 0
+            dir_size_freed = 0.0
+            
+            for file_path in all_files:
+                try:
+                    # Get file size before deletion
+                    file_size = file_path.stat().st_size / (1024 * 1024)  # Size in MB
+                    
+                    # Delete the file
+                    file_path.unlink()
+                    deleted_count += 1
+                    dir_size_freed += file_size
+                    
+                    # Show file type for better clarity
+                    file_type = file_path.suffix.upper() if file_path.suffix else "NO EXT"
+                    print(f"   ✅ Deleted: {file_path.name} ({file_type}, {file_size:.2f} MB)")
+                    
+                except Exception as e:
+                    print(f"   ❌ Failed to delete {file_path.name}: {e}")
+            
+            print(f"   📊 {description}: {deleted_count}/{len(all_files)} files deleted ({dir_size_freed:.2f} MB freed)")
+            total_deleted += deleted_count
+            total_size_freed += dir_size_freed
+            
+        except Exception as e:
+            print(f"❌ Error cleaning {description}: {e}")
+    
+    # Summary
+    print(f"\n📊 CLEANUP SUMMARY:")
+    print(f"   Total files deleted: {total_deleted}")
+    print(f"   Total space freed: {total_size_freed:.2f} MB")
+    
+    if total_deleted > 0:
+        print("✅ Comprehensive cleanup completed successfully!")
+        print("💾 All generated files have been removed")
+        print("🔄 Ready for fresh workflow execution")
+    else:
+        print("📁 No files were found to delete")
+    
+    return total_deleted
+
 def display_final_summary(template_results: Dict[str, bool]):
     """Display final workflow summary"""
     print("\n" + "=" * 80)
@@ -406,16 +571,90 @@ def display_final_summary(template_results: Dict[str, bool]):
             output_files = list(output_path.glob("presentation_template_*.pptx"))
             for file_path in output_files:
                 print(f"   - {file_path.name}")
+        
+        print(f"\n🔍 CONTENT VERIFICATION:")
+        print(f"   All generated presentations underwent content verification")
+        print(f"   Each presentation was checked for:")
+        print(f"   • Empty placeholders")
+        print(f"   • Default template text")
+        print(f"   • Content accuracy vs. intended content")
+        print(f"   • Successful content application rates")
     
     print(f"\n🎯 WORKFLOW STATUS: {'SUCCESS' if successful_templates > 0 else 'FAILED'}")
 
 # --- Main Workflow Execution ---
 def main():
     """Main workflow execution"""
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(
+        description="JuniorAI - AI-Powered Presentation Generator",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python3 main.py                           # Run normal workflow
+  python3 main.py --template_clean          # Run workflow and clean up downloaded templates
+  python3 main.py --auto-fix-critical       # Run workflow with auto-fix for critical content issues
+  python3 main.py --auto-fix-critical --template_clean  # Run workflow with auto-fix and cleanup
+  python3 main.py --cleanall                # ONLY clean up ALL generated files (no workflow)
+        """
+    )
+    
+    parser.add_argument(
+        "--template_clean", 
+        action="store_true", 
+        help="Delete downloaded template files after workflow completion"
+    )
+    
+    parser.add_argument(
+        "--auto-fix-critical",
+        action="store_true",
+        help="Automatically attempt to fix critical content verification issues"
+    )
+    
+    parser.add_argument(
+        "--cleanall",
+        action="store_true",
+        help="Delete ALL generated files (content/, output/, downloaded_templates/) - NO WORKFLOW EXECUTION"
+    )
+    
+    args = parser.parse_args()
+    
+    # Handle --cleanall as standalone operation (no workflow execution)
+    if args.cleanall:
+        print("🗑️  JUNIORAI CLEANUP ONLY MODE")
+        print("=" * 80)
+        print("Performing comprehensive cleanup of all generated files...")
+        print("No workflow will be executed.")
+        print("=" * 80)
+        
+        # Perform comprehensive cleanup
+        cleanup_intermediate_files()
+        total_deleted = cleanup_all_generated_files()
+        
+        # Summary for cleanup-only mode
+        print("\n" + "=" * 80)
+        print("🗑️  CLEANUP COMPLETED")
+        print("=" * 80)
+        
+        if total_deleted > 0:
+            print("✅ All generated files have been successfully removed!")
+            print("🔄 Environment is now clean and ready for fresh workflow execution")
+        else:
+            print("📁 No generated files were found to delete")
+            print("💡 Environment was already clean")
+        
+        print("\n🎯 CLEANUP STATUS: SUCCESS")
+        return  # Exit without running workflow
+    
+    # Normal workflow execution (when --cleanall is not provided)
     print("🚀 JUNIORAI COMPLETE PRESENTATION WORKFLOW")
     print("=" * 80)
-    print("Workflow: AI Template Selection → Download → Process Both Templates")
+    print("Workflow: AI Template Selection → Download → Process Both Templates → Verify Content")
     print(f"Working directory: {os.getcwd()}")
+    if args.template_clean:
+        print("🗑️  Template cleanup: ENABLED (will delete downloaded templates after workflow)")
+    if args.auto_fix_critical:
+        print("🔧 Auto-fix: ENABLED (will automatically repair critical content issues)")
     print("=" * 80)
     
     overall_success = False
@@ -446,7 +685,7 @@ def main():
             return
         
         # Step 3: Process both templates through complete workflow
-        template_results = run_template_processing_workflow(user_content)
+        template_results = run_template_processing_workflow(user_content, args.auto_fix_critical)
         
         if template_results:
             overall_success = any(template_results.values())
@@ -455,8 +694,12 @@ def main():
         print(f"❌ Unexpected error in main workflow: {e}")
     
     finally:
-        # Always clean up and show summary
+        # Always clean up and show summary (only for workflow execution)
         cleanup_intermediate_files()
+        
+        # Clean up downloaded templates if requested (only when workflow was executed)
+        if args.template_clean:
+            cleanup_downloaded_templates()
         
         if template_results:
             display_final_summary(template_results)
